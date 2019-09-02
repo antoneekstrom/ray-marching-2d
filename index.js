@@ -5,6 +5,7 @@ const MODE_RENDER = "render";
 const MODE_SCENE = "scene";
 
 let ray;
+let camera;
 let objects;
 
 let objectCount = 10;
@@ -74,24 +75,26 @@ class Ray {
         if (scene != null) this.calcMinDist(scene);
     }
 
-    hasCollided() {
+    get hasCollided() {
         return this.minDist <= this.collisionThreshold;
     }
 
     get lastResult() {
         return Object.assign(this.state, {
             minDist: this.minDist,
-            collided: this.hasCollided(),
+            collided: this.hasCollided,
         });
     }
 
     march(distance, options) {
 
-        const { xRange, yRange, maxLen } = options;
-        if (xRange != undefined && this.position.x < xRange.x && this.position.x > xRange.y) return this.lastResult;
-        if (yRange != undefined && this.position.y < yRange.x && this.position.y > yRange.y) return this.lastResult;
-        if (maxLen != undefined && this.len >= maxLen) return this.lastResult;
-        if (this.minDist < this.collisionThreshold) return this.lastResult;
+        if (options != undefined) {
+            const { xRange, yRange, maxLen } = options;
+            if (xRange != undefined && this.position.x < xRange.x && this.position.x > xRange.y) return this.lastResult;
+            if (yRange != undefined && this.position.y < yRange.x && this.position.y > yRange.y) return this.lastResult;
+            if (maxLen != undefined && this.len >= maxLen) return this.lastResult;
+        }
+        if (this.hasCollided) return this.lastResult;
 
         this.unshiftState();
         this.steps++;
@@ -139,24 +142,45 @@ class Ray {
 }
 
 class Camera {
-    constructor(pos, rotation, fov, res) {
+    constructor(scene, pos, rotation, fov, res) {
+        this.scene = scene;
         this.pos = pos;
         this.rotation = rotation;
         this.fov = fov;
         this.res = res;
 
+        this.renderFinished = false;
         this.rays = [];
     }
+
+    get cameraDirection() {
+        return createVector(cos(this.rotation), sin(this.rotation));
+    }
+
     init() {
+        const camDir = this.cameraDirection;
+        const halfView = camDir.copy().mult(0.5);
         for (let i = 0; i < this.res; i++) {
-            const dir = createVector();
+            const dir = camDir.copy().sub(halfView).add(camDir.copy().mult((this.fov / this.res) * i));
+            console.log(dir);
             const dist = createVector(0, 0);
             const ray = new Ray(this.pos, dir, dist, objects);
             this.rays.push(ray);
         }
     }
+
     render() {
-        // return array of points?
+        if (this.renderFinished) return;
+        let collided = true;
+        for (const ray of this.rays) {
+            if (!ray.hasCollided) {
+                ray.calcMinDist(this.scene);
+                const result = ray.march(null, marchingOptions);
+                if (result.collided) console.log(ray);
+                collided = false;
+            }
+        }
+        this.renderFinished = collided;
     }
 }
 
@@ -236,7 +260,9 @@ function setup() {
     }
 
     objects = createScene(objectCount);
-    ray = new Ray(createVector(width / 4, height / 2), createVector(1, 0), createVector(0, 0), objects);
+    //ray = new Ray(createVector(width / 4, height / 2), createVector(1, 0), createVector(0, 0), objects);
+    camera = new Camera(objects, createVector(width / 4, height / 2), 0, 45, 10);
+    camera.init();
 
     oncontextmenu = (ev) => false;
 }
@@ -291,25 +317,33 @@ function reset(scene) {
     ray.resetState(scene);
 }
 
-function drawScene() {
+function drawScene(ray, scene) {
     ray.history.forEach(ray.drawState);
-    objects.forEach(obj => obj.draw());
+    scene.forEach(obj => obj.draw());
 }
 
-function renderScene() {
-
+function renderScene(ray, scene) {
 }
 
-function draw() {
-    background(0);
-
-    if (autoMarch)
-    if (ray.position.x <= width && ray.position.y <= height && ray.minDist > 0.1) {
-        ray.calcMinDist(objects);
+function updateRay(ray, scene) {
+    if (autoMarch && !ray.hasCollided) {
+        ray.calcMinDist(scene);
         const r = ray.march(null, marchingOptions);
         if (r.collided) console.log(r);
     }
 
-    if (renderMode == MODE_RENDER) renderScene();
-    else if (renderMode == MODE_SCENE) drawScene();
+    if (renderMode == MODE_RENDER) renderScene(ray, scene);
+    else if (renderMode == MODE_SCENE) drawScene(ray, scene);
+}
+
+function draw() {
+    background(0);
+    camera.render();
+
+    noStroke();
+    fill(255);
+    camera.rays.forEach(r => {
+        //circle(r.position.x, r.position.y, 5);
+        r.draw();
+    });
 }
